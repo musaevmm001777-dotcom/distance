@@ -745,15 +745,27 @@
       function updateConnection() {
         if (!map || !myMarker) return;
         if (!currentMe || !friendPoint) {
-          [friendMarker, routeGlow, routeLine, routeDistanceMarker].forEach((layer) => {
+          [routeGlow, routeLine, routeDistanceMarker].forEach((layer) => {
             if (layer && map.hasLayer(layer)) map.removeLayer(layer);
           });
           if (currentMe) {
+            if (!map.hasLayer(myMarker)) myMarker.addTo(map);
             myMarker.setLatLng(currentMe);
           } else if (map.hasLayer(myMarker)) {
             map.removeLayer(myMarker);
           }
-          friendMarker = null;
+          if (friendPoint) {
+            if (!friendMarker) {
+              friendMarker = L.marker(friendPoint, { icon: customPin(true), keyboard: false }).addTo(map);
+            } else {
+              friendMarker.setLatLng(friendPoint);
+              if (!map.hasLayer(friendMarker)) friendMarker.addTo(map);
+            }
+            friendMarker.setPopupContent(`${elements.friendName.textContent} · точка друга`);
+          } else if (friendMarker) {
+            if (map.hasLayer(friendMarker)) map.removeLayer(friendMarker);
+            friendMarker = null;
+          }
           routeGlow = null;
           routeLine = null;
           routeDistanceMarker = null;
@@ -928,12 +940,12 @@
           elements.locationButton.hidden = true;
           elements.hideLocationButton.hidden = false;
           elements.locationState.textContent = "Точка видна твоему другу, пока ты её не скроешь.";
-          elements.connectionDot.classList.add("is-live");
         } else {
           elements.locationButton.hidden = false;
           elements.hideLocationButton.hidden = true;
           elements.locationState.textContent = "Твоя точка скрыта. Нажми, чтобы поделиться ею с другом.";
         }
+        elements.connectionDot.classList.toggle("is-live", Boolean(currentMe));
 
         if (friendPoint) {
           elements.placesText.textContent = currentMe

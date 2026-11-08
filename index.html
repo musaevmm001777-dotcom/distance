@@ -7,7 +7,7 @@
   <meta name="description" content="Маленькое пространство для связи на любом расстоянии.">
   <title>distance — между нами</title>
   <link rel="preconnect" href="https://unpkg.com">
-  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="preconnect" href="https://gibs.earthdata.nasa.gov">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -72,11 +72,12 @@
       inset: 0;
       content: "";
       pointer-events: none;
-      background: linear-gradient(180deg, rgba(7, 9, 15, .55), transparent 27%, transparent 58%, rgba(7, 9, 15, .54));
+      background: linear-gradient(180deg, rgba(7, 9, 15, .18), transparent 24%, transparent 67%, rgba(7, 9, 15, .25));
     }
 
     .leaflet-container { background: #0a0e17; font: inherit; }
-    .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.62) saturate(.7) contrast(1.08); }
+    .leaflet-tile { filter: brightness(1.08) saturate(1.12) contrast(1.04); }
+    .leaflet-overlay-pane path.connection-glow { filter: drop-shadow(0 0 7px rgba(197, 165, 255, .95)); }
     .leaflet-control-attribution {
       margin: 0 12px 12px 0 !important;
       padding: 3px 7px !important;
@@ -339,20 +340,22 @@
     .chat-panel {
       position: absolute;
       z-index: 700;
-      top: 0;
-      right: 0;
+      top: 50%;
+      right: max(20px, calc((100vw - 1180px) / 2));
       display: flex;
-      width: min(390px, 100%);
-      height: 100%;
+      width: min(360px, calc(100% - 40px));
+      height: min(590px, calc(100% - 110px));
       flex-direction: column;
-      padding: max(18px, env(safe-area-inset-top)) 18px max(16px, env(safe-area-inset-bottom));
-      transform: translateX(105%);
-      border-radius: 24px 0 0 24px;
-      background: rgba(13, 17, 26, .95);
+      padding: 18px;
+      transform: translate(110%, -50%);
+      border-radius: 24px;
+      background: rgba(13, 17, 26, .84);
       transition: transform .34s cubic-bezier(.2, .8, .2, 1);
       pointer-events: auto;
     }
-    .chat-panel.is-open { transform: translateX(0); }
+    .chat-panel.is-open { transform: translate(0, -50%); }
+    .app.chat-open .bottom-area { opacity: 0; transform: translateY(18px); pointer-events: none; }
+    .bottom-area { transition: opacity .22s ease, transform .22s ease; }
     .chat-header { display: flex; align-items: center; gap: 11px; padding: 6px 0 16px; border-bottom: 1px solid var(--line); }
     .chat-title { flex: 1; min-width: 0; }
     .chat-title strong { display: block; font-size: 14px; }
@@ -448,7 +451,19 @@
       .action-stack { grid-template-columns: 1fr 1fr; align-items: center; gap: 8px; }
       .action-stack .button { min-height: 42px; }
       .location-state { max-width: none; grid-column: 1 / -1; grid-row: 2; text-align: left; }
-      .chat-panel { width: min(100%, 390px); border-radius: 22px 0 0 22px; }
+      .chat-panel {
+        top: auto;
+        right: 10px;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        width: calc(100% - 20px);
+        height: min(390px, 46vh);
+        min-height: 290px;
+        padding: 14px;
+        transform: translateY(calc(100% + 24px));
+        border-radius: 22px;
+        background: rgba(13, 17, 26, .84);
+      }
+      .chat-panel.is-open { transform: translateY(0); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -567,6 +582,7 @@
       let map = null;
       let myMarker = null;
       let friendMarker = null;
+      let routeGlow = null;
       let routeLine = null;
       let signalMarker = null;
       let currentMe = [...demoPoints.me];
@@ -601,8 +617,9 @@
       }
 
       function updateConnection() {
-        if (!map || !myMarker || !friendMarker || !routeLine) return;
+        if (!map || !myMarker || !friendMarker || !routeGlow || !routeLine) return;
         myMarker.setLatLng(currentMe);
+        routeGlow.setLatLngs([currentMe, demoPoints.friend]);
         routeLine.setLatLngs([currentMe, demoPoints.friend]);
         elements.distanceText.textContent = `${Math.round(haversineKm(currentMe, demoPoints.friend)).toLocaleString("ru-RU")} км`;
         map.fitBounds(L.latLngBounds([currentMe, demoPoints.friend]), { padding: [90, 90], maxZoom: 5, animate: true });
@@ -619,10 +636,19 @@
           map = null;
         }
         map = L.map("map", { zoomControl: false, scrollWheelZoom: false, worldCopyJump: true, attributionControl: true });
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          }).addTo(map);
+        L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg", {
+          minZoom: 0,
+          maxZoom: 8,
+          maxNativeZoom: 8,
+          attribution: '&copy; <a href="https://earthdata.nasa.gov/">NASA Earth Observatory</a> · Earth at Night (2012)'
+        }).addTo(map);
+        routeGlow = L.polyline([currentMe, demoPoints.friend], {
+          className: "connection-glow",
+          color: "#b592ff",
+          weight: 7,
+          opacity: .46,
+          lineCap: "round"
+        }).addTo(map);
         routeLine = L.polyline([currentMe, demoPoints.friend], {
           color: "#c5a5ff",
           weight: 1.4,
@@ -636,14 +662,43 @@
       }
 
       function openChat() {
+        document.querySelector(".app").classList.add("chat-open");
         elements.chatPanel.classList.add("is-open");
         elements.chatPanel.setAttribute("aria-hidden", "false");
+        if (map) {
+          map.invalidateSize();
+          const bounds = L.latLngBounds([currentMe, demoPoints.friend]);
+          if (window.matchMedia("(max-width: 640px)").matches) {
+            map.fitBounds(bounds, {
+              paddingTopLeft: [28, 108],
+              paddingBottomRight: [28, Math.ceil(window.innerHeight * .48)],
+              maxZoom: 5,
+              animate: true
+            });
+          } else {
+            map.fitBounds(bounds, {
+              paddingTopLeft: [35, 90],
+              paddingBottomRight: [Math.min(405, Math.ceil(window.innerWidth * .34)), 90],
+              maxZoom: 5,
+              animate: true
+            });
+          }
+        }
         window.setTimeout(() => elements.messageInput.focus(), 250);
       }
 
       function closeChat() {
         elements.chatPanel.classList.remove("is-open");
         elements.chatPanel.setAttribute("aria-hidden", "true");
+        document.querySelector(".app").classList.remove("chat-open");
+        if (map) {
+          map.invalidateSize();
+          map.fitBounds(L.latLngBounds([currentMe, demoPoints.friend]), {
+            padding: [95, 95],
+            maxZoom: 5,
+            animate: true
+          });
+        }
       }
 
       function showInviteInfo() {

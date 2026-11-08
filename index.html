@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
     :root {
       color-scheme: dark;
@@ -558,13 +559,13 @@
     <section class="bottom-area" aria-label="Связь">
       <div class="bottom-content">
         <div class="glass-card connection-card">
-          <div class="eyebrow"><span>ваше пространство</span><span class="demo-badge">ЛОКАЛЬНОЕ ДЕМО</span></div>
+          <div class="eyebrow"><span>ваше пространство</span><span class="demo-badge" id="connectionBadge">ЛОКАЛЬНОЕ ДЕМО</span></div>
           <div class="connection-main">
             <div class="people">
               <div class="avatar" id="myAvatar" aria-hidden="true">Я</div>
               <div>
-                <div class="person-name">Ты <span style="color:#858d9d;font-weight:450">↔</span> Мила</div>
-                <div class="person-place" id="placesText">Точка рядом с Москвой · пример у Берлина</div>
+                <div class="person-name"><span id="myName">Ты</span> <span style="color:#858d9d;font-weight:450">↔</span> <span id="friendName">Мила</span></div>
+                <div class="person-place" id="placesText">Пример: Москва · Берлин</div>
               </div>
             </div>
             <div class="distance"><span id="distanceText">1 609 км</span><span class="distance-caption">по прямой</span></div>
@@ -572,7 +573,7 @@
           <div class="connection-caption">Отправь сообщение — и маленький световой сигнал пройдёт между точками.</div>
         </div>
         <div class="action-stack">
-          <button class="button button-primary" id="locationButton" type="button">◎ Показать мою точку</button>
+          <button class="button button-primary" id="locationButton" type="button">◎ Поделиться точкой</button>
           <button class="button button-subtle" id="hideLocationButton" type="button" hidden>Скрыть точку</button>
           <button class="button button-subtle" id="chatButton" type="button">Открыть переписку&nbsp; ↗</button>
           <div class="location-state" id="locationState">Твоя геопозиция не запрашивалась и никуда не отправляется.</div>
@@ -583,14 +584,14 @@
     <aside class="chat-panel" id="chatPanel" aria-label="Личная переписка" aria-hidden="true">
       <div class="chat-header">
         <div class="avatar friend" aria-hidden="true">М</div>
-        <div class="chat-title"><strong>Ты и Мила</strong><span>демо-переписка · только на этом устройстве</span></div>
+        <div class="chat-title"><strong id="chatTitle">Ты и Мила</strong><span id="chatSubtitle">демо-переписка · только на этом устройстве</span></div>
         <button class="icon-button" id="chatCloseButton" type="button" aria-label="Закрыть чат">×</button>
       </div>
       <div class="chat-messages" id="chatMessages" aria-live="polite">
         <div class="message">Я здесь. Просто захотелось напомнить 💜<span class="message-time">пример</span></div>
         <div class="message mine">Вижу твой огонёк ✨<span class="message-time">пример</span></div>
       </div>
-      <p class="chat-note">Это демонстрация: сообщения пока не отправляются другому человеку. Подключим приватный чат после настройки базы.</p>
+      <p class="chat-note" id="chatNote">Это демонстрация: сообщения пока не отправляются другому человеку.</p>
       <form class="chat-form" id="chatForm">
         <input class="chat-input" id="messageInput" maxlength="500" autocomplete="off" placeholder="Отправить сигнал..." aria-label="Сообщение">
         <button class="button button-primary send-button" type="submit" aria-label="Отправить сообщение">↑</button>
@@ -608,11 +609,13 @@
         <button class="icon-button modal-close" id="modalCloseButton" type="button" aria-label="Закрыть">×</button>
         <div class="modal-icon" aria-hidden="true">⌖</div>
         <h2 id="modalTitle">Пригласить близкого</h2>
-        <p>Пока это визуальный прототип: точки и сообщения видны только тебе на этом устройстве. Чтобы приглашение действительно связало два телефона, сначала подключим базу и безопасную авторизацию.</p>
+        <p id="inviteDescription">Пригласи близкого: вы получите личную связь на карте и чат только для вас двоих.</p>
         <div class="modal-actions">
-          <button class="button button-primary" id="modalOkayButton" type="button">Понятно</button>
+          <button class="button button-primary" id="createInviteButton" type="button">Создать приглашение</button>
+          <button class="button button-subtle" id="copyInviteButton" type="button" hidden>Скопировать ссылку</button>
+          <button class="button button-subtle" id="modalOkayButton" type="button">Закрыть</button>
         </div>
-        <div class="modal-footnote">Геопозиция включается только по твоему нажатию. Сейчас координаты остаются в памяти этой страницы и не сохраняются.</div>
+        <div class="modal-footnote" id="inviteFootnote">Местоположение не запрашивается, пока ты сам не нажмёшь «Поделиться точкой».</div>
       </div>
     </div>
   </main>
@@ -625,23 +628,38 @@
         me: [55.751244, 37.618423],
         friend: [52.520008, 13.404954]
       };
+      const supabaseUrl = "https://rqllfzzauqywdbglxmuo.supabase.co";
+      const supabasePublishableKey = "sb_publishable_dUs7PFVMvUXUj4MdUsaegg_A80fG7St";
       const elements = {
         mapStatus: document.getElementById("mapStatus"),
         connectionDot: document.getElementById("connectionDot"),
+        connectionBadge: document.getElementById("connectionBadge"),
         locationButton: document.getElementById("locationButton"),
         hideLocationButton: document.getElementById("hideLocationButton"),
         locationState: document.getElementById("locationState"),
         placesText: document.getElementById("placesText"),
         distanceText: document.getElementById("distanceText"),
+        myName: document.getElementById("myName"),
+        friendName: document.getElementById("friendName"),
+        chatTitle: document.getElementById("chatTitle"),
+        chatSubtitle: document.getElementById("chatSubtitle"),
+        chatNote: document.getElementById("chatNote"),
         chatPanel: document.getElementById("chatPanel"),
         chatMessages: document.getElementById("chatMessages"),
         chatForm: document.getElementById("chatForm"),
         messageInput: document.getElementById("messageInput"),
         toast: document.getElementById("toast"),
         privacyModal: document.getElementById("privacyModal"),
+        inviteDescription: document.getElementById("inviteDescription"),
+        inviteFootnote: document.getElementById("inviteFootnote"),
+        createInviteButton: document.getElementById("createInviteButton"),
+        copyInviteButton: document.getElementById("copyInviteButton"),
         mapError: document.getElementById("mapError")
       };
 
+      const supabaseClient = window.supabase
+        ? window.supabase.createClient(supabaseUrl, supabasePublishableKey)
+        : null;
       let map = null;
       let myMarker = null;
       let friendMarker = null;
@@ -652,6 +670,16 @@
       let nightLightsLayer = null;
       let signalMarker = null;
       let currentMe = [...demoPoints.me];
+      let friendPoint = [...demoPoints.friend];
+      let currentUser = null;
+      let connectionId = null;
+      let friendUserId = null;
+      let activeInviteUrl = "";
+      let realtimeChannel = null;
+      let isPaired = false;
+      let isDemo = true;
+      let sendingMessage = false;
+      const renderedMessageIds = new Set();
       let toastTimer = 0;
 
       function showToast(message) {
@@ -715,24 +743,78 @@
       }
 
       function updateConnection() {
-        if (!map || !myMarker || !friendMarker || !routeGlow || !routeLine) return;
-        const path = greatCirclePath(currentMe, demoPoints.friend);
+        if (!map || !myMarker) return;
+        if (!currentMe || !friendPoint) {
+          [friendMarker, routeGlow, routeLine, routeDistanceMarker].forEach((layer) => {
+            if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+          });
+          if (currentMe) {
+            myMarker.setLatLng(currentMe);
+          } else if (map.hasLayer(myMarker)) {
+            map.removeLayer(myMarker);
+          }
+          friendMarker = null;
+          routeGlow = null;
+          routeLine = null;
+          routeDistanceMarker = null;
+          elements.distanceText.textContent = "ожидаем точку";
+          map.setView(currentMe || friendPoint || demoPoints.me, 4, { animate: true });
+          return;
+        }
+        if (!map.hasLayer(myMarker)) myMarker.addTo(map);
+        const path = greatCirclePath(currentMe, friendPoint);
         connectionPath = path;
         myMarker.setLatLng(currentMe);
-        routeGlow.setLatLngs(path);
-        routeLine.setLatLngs(path);
-        const distance = `${Math.round(haversineKm(currentMe, demoPoints.friend)).toLocaleString("ru-RU")} км`;
-        elements.distanceText.textContent = distance;
-        if (routeDistanceMarker) {
-          routeDistanceMarker.setLatLng(path[Math.floor(path.length / 2)]);
-          routeDistanceMarker.setIcon(L.divIcon({
-            className: "leaflet-route-label-icon",
-            html: `<span class="route-distance-label">${distance}</span>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0]
-          }));
+        if (!friendMarker) {
+          friendMarker = L.marker(friendPoint, { icon: customPin(true), keyboard: false }).addTo(map);
+        } else {
+          friendMarker.setLatLng(friendPoint);
         }
-        map.fitBounds(L.latLngBounds([currentMe, demoPoints.friend]), { padding: [90, 90], maxZoom: 5, animate: true });
+        if (!routeGlow) {
+          routeGlow = L.polyline(path, {
+            className: "connection-glow",
+            color: "#b592ff",
+            weight: 3.5,
+            opacity: .24,
+            lineCap: "round"
+          }).addTo(map);
+        } else {
+          routeGlow.setLatLngs(path);
+        }
+        if (!routeLine) {
+          routeLine = L.polyline(path, {
+            color: "#ddc9ff",
+            weight: 1.15,
+            opacity: .96,
+            lineCap: "round"
+          }).addTo(map);
+        } else {
+          routeLine.setLatLngs(path);
+        }
+        const distance = `${Math.round(haversineKm(currentMe, friendPoint)).toLocaleString("ru-RU")} км`;
+        elements.distanceText.textContent = distance;
+        const labelIcon = L.divIcon({
+          className: "leaflet-route-label-icon",
+          html: `<span class="route-distance-label">${distance}</span>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0]
+        });
+        if (!routeDistanceMarker) {
+          routeDistanceMarker = L.marker(path[Math.floor(path.length / 2)], {
+            icon: labelIcon,
+            interactive: false,
+            keyboard: false,
+            zIndexOffset: 1000
+          }).addTo(map);
+        } else {
+          routeDistanceMarker.setLatLng(path[Math.floor(path.length / 2)]);
+          routeDistanceMarker.setIcon(labelIcon);
+        }
+        friendMarker.setPopupContent(`${elements.friendName.textContent} · точка друга`);
+        myMarker.setPopupContent(isDemo
+          ? "Москва, Россия · демо-точка"
+          : "Твоя точка · точный адрес не отображается");
+        map.fitBounds(L.latLngBounds([currentMe, friendPoint]), { padding: [90, 90], maxZoom: 5, animate: true });
       }
 
       function initializeMap() {
@@ -772,37 +854,305 @@
           nightLightsLayer.setOpacity(zoom <= 5 ? .76 : Math.max(0, .76 - (zoom - 5) * .19));
         });
 
-        const path = greatCirclePath(currentMe, demoPoints.friend);
-        routeGlow = L.polyline(path, {
-          className: "connection-glow",
-          color: "#b592ff",
-          weight: 3.5,
-          opacity: .24,
-          lineCap: "round"
-        }).addTo(map);
-        routeLine = L.polyline(path, {
-          color: "#ddc9ff",
-          weight: 1.15,
-          opacity: .96,
-          lineCap: "round"
-        }).addTo(map);
-        routeDistanceMarker = L.marker(path[Math.floor(path.length / 2)], {
-          icon: L.divIcon({
-            className: "leaflet-route-label-icon",
-            html: `<span class="route-distance-label">${Math.round(haversineKm(currentMe, demoPoints.friend)).toLocaleString("ru-RU")} км</span>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0]
-          }),
-          interactive: false,
-          keyboard: false,
-          zIndexOffset: 1000
-        }).addTo(map);
         myMarker = L.marker(currentMe, { icon: customPin(false), keyboard: false }).addTo(map);
-        friendMarker = L.marker(demoPoints.friend, { icon: customPin(true), keyboard: false })
+        friendMarker = L.marker(friendPoint, { icon: customPin(true), keyboard: false })
           .bindPopup("Берлин, Германия · демо-точка")
           .addTo(map);
         myMarker.bindPopup("Москва, Россия · демо-точка");
         updateConnection();
+      }
+
+      function setDemoUi() {
+        isDemo = true;
+        isPaired = false;
+        friendPoint = [...demoPoints.friend];
+        elements.connectionBadge.textContent = "ЛОКАЛЬНОЕ ДЕМО";
+        elements.myName.textContent = "Ты";
+        elements.friendName.textContent = "Мила";
+        elements.chatTitle.textContent = "Ты и Мила";
+        elements.chatSubtitle.textContent = "демо-переписка · только на этом устройстве";
+        elements.chatNote.textContent = "Демо: сообщения пока видны только на этом устройстве.";
+        elements.placesText.textContent = "Пример: Москва · Берлин";
+        elements.locationState.textContent = "Поделиться точкой можно после подключения к базе.";
+        elements.mapStatus.textContent = "демо-маршрут";
+        if (myMarker) myMarker.setLatLng(currentMe);
+        updateConnection();
+      }
+
+      function renderMessage(row) {
+        if (!row || renderedMessageIds.has(row.id)) return;
+        renderedMessageIds.add(row.id);
+        const message = document.createElement("div");
+        const mine = row.sender_id === currentUser.id;
+        message.className = mine ? "message mine" : "message";
+        message.append(document.createTextNode(row.body));
+        const time = document.createElement("span");
+        time.className = "message-time";
+        time.textContent = new Intl.DateTimeFormat("ru-RU", {
+          hour: "2-digit",
+          minute: "2-digit"
+        }).format(new Date(row.created_at));
+        message.append(time);
+        elements.chatMessages.append(message);
+        elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+        if (!mine && currentMe && friendPoint) animateSignal(friendPoint, currentMe);
+      }
+
+      async function loadMessages() {
+        if (!connectionId) return;
+        const { data, error } = await supabaseClient
+          .from("messages")
+          .select("id, connection_id, sender_id, body, created_at")
+          .eq("connection_id", connectionId)
+          .order("created_at", { ascending: true })
+          .limit(100);
+        if (error) throw error;
+        elements.chatMessages.replaceChildren();
+        renderedMessageIds.clear();
+        (data || []).forEach(renderMessage);
+      }
+
+      async function loadConnectionLocations() {
+        if (!connectionId || !currentUser || !friendUserId) return;
+        const { data, error } = await supabaseClient
+          .from("locations")
+          .select("user_id, latitude, longitude, updated_at")
+          .in("user_id", [currentUser.id, friendUserId]);
+        if (error) throw error;
+        const ownLocation = (data || []).find((row) => row.user_id === currentUser.id);
+        const friendLocation = (data || []).find((row) => row.user_id === friendUserId);
+        currentMe = ownLocation ? [ownLocation.latitude, ownLocation.longitude] : null;
+        friendPoint = friendLocation ? [friendLocation.latitude, friendLocation.longitude] : null;
+
+        if (currentMe) {
+          elements.locationButton.hidden = true;
+          elements.hideLocationButton.hidden = false;
+          elements.locationState.textContent = "Точка видна твоему другу, пока ты её не скроешь.";
+          elements.connectionDot.classList.add("is-live");
+        } else {
+          elements.locationButton.hidden = false;
+          elements.hideLocationButton.hidden = true;
+          elements.locationState.textContent = "Твоя точка скрыта. Нажми, чтобы поделиться ею с другом.";
+        }
+
+        if (friendPoint) {
+          elements.placesText.textContent = currentMe
+            ? "Вы оба на карте · личная связь"
+            : `${elements.friendName.textContent} поделился точкой`;
+        } else {
+          elements.placesText.textContent = currentMe
+            ? "Ты на карте · ждём точку друга"
+            : "Точки пока скрыты";
+        }
+        elements.mapStatus.textContent = currentMe && friendPoint
+          ? "ваши точки связаны"
+          : "ожидаем точки";
+        updateConnection();
+      }
+
+      function subscribeToConnection() {
+        if (!connectionId || !supabaseClient) return;
+        if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+        realtimeChannel = supabaseClient
+          .channel(`distance-${connectionId}`)
+          .on("postgres_changes", {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+            filter: `connection_id=eq.${connectionId}`
+          }, (payload) => renderMessage(payload.new))
+          .on("postgres_changes", {
+            event: "*",
+            schema: "public",
+            table: "locations"
+          }, () => loadConnectionLocations().catch(showBackendError))
+          .on("postgres_changes", {
+            event: "*",
+            schema: "public",
+            table: "connections",
+            filter: `id=eq.${connectionId}`
+          }, () => refreshConnection().catch(showBackendError))
+          .subscribe((status) => {
+            if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+              showToast("Связь временно нестабильна. Попробуем подключиться снова.");
+            }
+          });
+      }
+
+      function showBackendError(error) {
+        console.error("Distance backend error:", error);
+        const message = error && error.message ? error.message : "Неизвестная ошибка Supabase.";
+        showToast(message.slice(0, 180));
+      }
+
+      async function refreshConnection() {
+        if (!currentUser) return;
+        const { data, error } = await supabaseClient
+          .from("connections")
+          .select("id, created_by, accepted_by, accepted_at")
+          .or(`created_by.eq.${currentUser.id},accepted_by.eq.${currentUser.id}`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+
+        if (!data || !data.accepted_by) {
+          connectionId = data ? data.id : null;
+          friendUserId = null;
+          isPaired = false;
+          isDemo = false;
+          currentMe = null;
+          friendPoint = null;
+          elements.connectionBadge.textContent = data ? "ЖДЁМ ДРУГА" : "ЖДЁМ ПРИГЛАШЕНИЕ";
+          elements.friendName.textContent = "Друг";
+          elements.chatTitle.textContent = "Личная переписка";
+          elements.chatSubtitle.textContent = data ? "ждём принятия приглашения" : "сначала пригласи близкого";
+          elements.chatMessages.replaceChildren();
+          elements.chatNote.textContent = data
+            ? "Чат станет доступен, когда друг примет приглашение."
+            : "Создай личное приглашение. После подключения друга сообщения появятся здесь.";
+          elements.placesText.textContent = "Поделитесь точками, чтобы увидеть расстояние";
+          elements.locationState.textContent = data
+            ? "Точка будет доступна после принятия приглашения и только по твоему согласию."
+            : "Сначала пригласи близкого. Затем вы сможете включить точки друг для друга.";
+          elements.locationButton.disabled = true;
+          elements.locationButton.title = data ? "Ждём принятия приглашения" : "Сначала пригласи близкого";
+          elements.mapStatus.textContent = data ? "ожидаем друга" : "готово к приглашению";
+          updateConnection();
+          elements.inviteDescription.textContent = data
+            ? "Приглашение создано. Когда друг откроет ссылку, вы появитесь друг у друга."
+            : "Создай личную ссылку и отправь её близкому. После принятия появится ваша общая карта и чат.";
+          if (data) {
+            const { data: inviteData, error: inviteError } = await supabaseClient
+              .from("connections")
+              .select("invite_code")
+              .eq("id", data.id)
+              .single();
+            if (inviteError) throw inviteError;
+            activeInviteUrl = new URL(window.location.href);
+            activeInviteUrl.searchParams.set("invite", inviteData.invite_code);
+            activeInviteUrl = activeInviteUrl.toString();
+            elements.copyInviteButton.hidden = false;
+            elements.createInviteButton.hidden = true;
+            subscribeToConnection();
+          }
+          return;
+        }
+
+        connectionId = data.id;
+        friendUserId = data.created_by === currentUser.id ? data.accepted_by : data.created_by;
+        isPaired = true;
+        isDemo = false;
+        elements.locationButton.disabled = false;
+        elements.locationButton.removeAttribute("title");
+        elements.connectionBadge.textContent = "ЛИЧНАЯ СВЯЗЬ";
+        elements.inviteDescription.textContent = "Вы уже связаны. Можешь скопировать ссылку-приглашение только для просмотра настроек.";
+        elements.createInviteButton.hidden = true;
+        elements.copyInviteButton.hidden = true;
+
+        const { data: profile, error: profileError } = await supabaseClient
+          .from("profiles")
+          .select("display_name")
+          .eq("user_id", friendUserId)
+          .maybeSingle();
+        if (profileError) throw profileError;
+        const name = profile?.display_name || "Друг";
+        elements.friendName.textContent = name;
+        elements.chatTitle.textContent = `${elements.myName.textContent} и ${name}`;
+        elements.chatSubtitle.textContent = "ваш приватный чат";
+        elements.chatNote.textContent = "Точка передаётся только между вами. Скрыть её можно кнопкой под картой.";
+        await Promise.all([loadConnectionLocations(), loadMessages()]);
+        subscribeToConnection();
+        if (activeInviteUrl) {
+          inviteUrl.searchParams.delete("invite");
+          window.history.replaceState({}, "", inviteUrl);
+          activeInviteUrl = "";
+        }
+      }
+
+      async function createInvite() {
+        if (!currentUser) {
+          showToast("Сначала подключи анонимный вход в Supabase, затем обнови страницу.");
+          return;
+        }
+        elements.createInviteButton.disabled = true;
+        elements.createInviteButton.textContent = "Создаём…";
+        const { data, error } = await supabaseClient.rpc("create_invite");
+        elements.createInviteButton.disabled = false;
+        elements.createInviteButton.textContent = "Создать приглашение";
+        if (error) throw error;
+        const invite = Array.isArray(data) ? data[0] : data;
+        if (!invite || !invite.invite_code) throw new Error("Supabase не вернул код приглашения.");
+        activeInviteUrl = new URL(window.location.href);
+        activeInviteUrl.searchParams.set("invite", invite.invite_code);
+        activeInviteUrl = activeInviteUrl.toString();
+        elements.inviteDescription.textContent = "Ссылка готова. Отправь её одному близкому человеку — после открытия он подключится к вашей личной карте.";
+        elements.inviteFootnote.textContent = "Код приглашения одноразовый. Точная геопозиция не передаётся без отдельного согласия.";
+        elements.createInviteButton.hidden = true;
+        elements.copyInviteButton.hidden = false;
+        await refreshConnection();
+        showToast("Личное приглашение создано.");
+      }
+
+      async function copyInvite() {
+        if (!activeInviteUrl) return;
+        try {
+          await navigator.clipboard.writeText(activeInviteUrl);
+          showToast("Ссылка приглашения скопирована.");
+        } catch (error) {
+          if (navigator.share) {
+            await navigator.share({ title: "Наша карта distance", text: "Давай соединим наши точки", url: activeInviteUrl });
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      async function initializeBackend() {
+        if (!supabaseClient) {
+          showToast("Не загрузилась библиотека Supabase. Обнови страницу.");
+          return;
+        }
+        try {
+          const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+          if (sessionError) throw sessionError;
+          let session = sessionData.session;
+          if (!session) {
+            const { data: authData, error: authError } = await supabaseClient.auth.signInAnonymously();
+            if (authError) throw authError;
+            session = authData.session;
+          }
+          if (!session) throw new Error("Не удалось создать личную сессию.");
+          currentUser = session.user;
+          elements.myName.textContent = "Я";
+          elements.connectionBadge.textContent = "ПОДКЛЮЧАЕМ…";
+          const inviteCode = new URLSearchParams(window.location.search).get("invite");
+          if (inviteCode) {
+            const { error: inviteError } = await supabaseClient.rpc("accept_invite", {
+              invite_code_input: inviteCode
+            });
+            if (inviteError) throw inviteError;
+            inviteUrl.searchParams.delete("invite");
+            window.history.replaceState({}, "", inviteUrl);
+            showToast("Приглашение принято. Теперь вы связаны.");
+          }
+          await refreshConnection();
+          if (!isPaired) {
+            elements.connectionBadge.textContent = "ГОТОВО К СВЯЗИ";
+            elements.locationState.textContent = connectionId
+              ? "Ждём, пока друг примет приглашение."
+              : "Создай приглашение другу. Точка будет передана только после твоего согласия.";
+          }
+        } catch (error) {
+          showBackendError(error);
+          const detail = error && error.message ? error.message.toLowerCase() : "";
+          if (detail.includes("anonymous") || detail.includes("disabled")) {
+            elements.inviteDescription.textContent = "Включи Anonymous sign-ins в Supabase Authentication → Sign In / Providers, затем обнови страницу.";
+          } else {
+            elements.inviteDescription.textContent = "Не удалось подключиться к Supabase. Проверь настройки проекта и обнови страницу.";
+          }
+          elements.connectionBadge.textContent = "ОФЛАЙН-ДЕМО";
+        }
       }
 
       function openChat() {
@@ -811,7 +1161,8 @@
         elements.chatPanel.setAttribute("aria-hidden", "false");
         if (map) {
           map.invalidateSize();
-          const bounds = L.latLngBounds([currentMe, demoPoints.friend]);
+          const visiblePoints = [currentMe, friendPoint].filter(Boolean);
+          const bounds = L.latLngBounds(visiblePoints.length ? visiblePoints : [demoPoints.me]);
           if (window.matchMedia("(max-width: 640px)").matches) {
             map.fitBounds(bounds, {
               paddingTopLeft: [28, 108],
@@ -837,7 +1188,8 @@
         document.querySelector(".app").classList.remove("chat-open");
         if (map) {
           map.invalidateSize();
-          map.fitBounds(L.latLngBounds([currentMe, demoPoints.friend]), {
+          const visiblePoints = [currentMe, friendPoint].filter(Boolean);
+          map.fitBounds(L.latLngBounds(visiblePoints.length ? visiblePoints : [demoPoints.me]), {
             padding: [95, 95],
             maxZoom: 5,
             animate: true
@@ -846,6 +1198,11 @@
       }
 
       function showInviteInfo() {
+        if (!activeInviteUrl && !isPaired) {
+          elements.createInviteButton.hidden = false;
+          elements.copyInviteButton.hidden = true;
+          elements.createInviteButton.disabled = !currentUser;
+        }
         elements.privacyModal.classList.add("is-open");
         elements.privacyModal.setAttribute("aria-hidden", "false");
       }
@@ -856,30 +1213,50 @@
       }
 
       function requestLocation() {
+        if (!currentUser) {
+          elements.locationState.textContent = "Сначала включи Anonymous sign-ins в Supabase, затем обнови страницу.";
+          showToast("Не получилось войти в Supabase. Проверь Anonymous sign-ins.");
+          return;
+        }
         if (!navigator.geolocation) {
-          elements.locationState.textContent = "Этот браузер не поддерживает геолокацию. Можно продолжить с демо-точкой.";
+          elements.locationState.textContent = "Этот браузер не поддерживает геолокацию.";
           showToast("Геолокация в этом браузере недоступна.");
           return;
         }
         elements.locationButton.disabled = true;
         elements.locationButton.textContent = "Определяем точку…";
-        elements.locationState.textContent = "Браузер спросит разрешение. Координаты останутся только в этой вкладке.";
-        navigator.geolocation.getCurrentPosition((position) => {
-          currentMe = [position.coords.latitude, position.coords.longitude];
-          myMarker.setPopupContent("Твоя точка · точный адрес не отображается");
-          elements.locationButton.hidden = true;
-          elements.hideLocationButton.hidden = false;
-          elements.locationState.textContent = "Точка показана только тебе. Она не сохраняется и не отправляется.";
-          elements.placesText.textContent = "Твоя текущая точка · пример у Берлина";
-          elements.mapStatus.textContent = "точка видна только тебе";
-          elements.connectionDot.classList.add("is-live");
-          updateConnection();
-          elements.locationButton.disabled = false;
-          elements.locationButton.textContent = "◎ Показать мою точку";
-          showToast("Точка показана на карте только для этой сессии.");
+        elements.locationState.textContent = "После подтверждения браузера точка станет доступна только подключённому другу, пока ты её не скроешь.";
+        navigator.geolocation.getCurrentPosition(async (position) => {
+          const newLocation = [position.coords.latitude, position.coords.longitude];
+          try {
+            const { error } = await supabaseClient.rpc("set_my_location", {
+              latitude_input: newLocation[0],
+              longitude_input: newLocation[1]
+            });
+            if (error) throw error;
+            currentMe = newLocation;
+            isDemo = false;
+            elements.connectionBadge.textContent = isPaired ? "ЛИЧНАЯ СВЯЗЬ" : "ТОЧКА СОХРАНЕНА";
+            elements.locationButton.hidden = true;
+            elements.hideLocationButton.hidden = false;
+            elements.locationState.textContent = isPaired
+              ? "Точка видна только подключённому другу. Нажми «Скрыть точку», чтобы удалить её."
+              : "Точка сохранена приватно. Создай приглашение — только принятый друг сможет её увидеть.";
+            elements.mapStatus.textContent = isPaired ? "ваши точки связаны" : "твоя точка";
+            elements.connectionDot.classList.add("is-live");
+            updateConnection();
+            elements.locationButton.disabled = false;
+            elements.locationButton.textContent = "◎ Поделиться точкой";
+            showToast(isPaired ? "Точка передана только твоему другу." : "Точка пока видна только тебе.");
+          } catch (error) {
+            elements.locationButton.disabled = false;
+            elements.locationButton.textContent = "◎ Поделиться точкой";
+            elements.locationState.textContent = "Не удалось безопасно сохранить точку. Повтори попытку.";
+            showBackendError(error);
+          }
         }, (error) => {
           elements.locationButton.disabled = false;
-          elements.locationButton.textContent = "◎ Показать мою точку";
+          elements.locationButton.textContent = "◎ Поделиться точкой";
           let reason = "Не удалось получить геопозицию.";
           if (error.code === error.PERMISSION_DENIED) reason = "Доступ запрещён. Разреши геолокацию в настройках браузера, если захочешь попробовать.";
           if (error.code === error.POSITION_UNAVAILABLE) reason = "Браузер пока не может определить геопозицию.";
@@ -889,17 +1266,28 @@
         }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
       }
 
-      function hideLocation() {
-        currentMe = [...demoPoints.me];
-        if (myMarker) myMarker.setPopupContent("Москва, Россия · демо-точка");
-        elements.locationButton.hidden = false;
-        elements.hideLocationButton.hidden = true;
-        elements.locationState.textContent = "Твоя геопозиция скрыта и удалена из памяти страницы.";
-        elements.placesText.textContent = "Точка рядом с Москвой · пример у Берлина";
-        elements.mapStatus.textContent = "демо-маршрут";
-        elements.connectionDot.classList.remove("is-live");
-        updateConnection();
-        showToast("Точка скрыта. Точные координаты очищены.");
+      async function hideLocation() {
+        if (!currentUser) return;
+        elements.hideLocationButton.disabled = true;
+        try {
+          const { error } = await supabaseClient.rpc("hide_my_location");
+          if (error) throw error;
+          currentMe = null;
+          elements.locationButton.hidden = false;
+          elements.hideLocationButton.hidden = true;
+          elements.locationState.textContent = "Точка удалена и больше не видна другу.";
+          elements.placesText.textContent = friendPoint
+            ? `${elements.friendName.textContent} поделился точкой`
+            : "Точки пока скрыты";
+          elements.mapStatus.textContent = friendPoint ? "точка друга" : "ожидаем точки";
+          elements.connectionDot.classList.remove("is-live");
+          updateConnection();
+          showToast("Точка удалена из базы.");
+        } catch (error) {
+          showBackendError(error);
+        } finally {
+          elements.hideLocationButton.disabled = false;
+        }
       }
 
       function animateSignal(from, to) {
@@ -929,21 +1317,40 @@
         window.requestAnimationFrame(step);
       }
 
-      function addMessage(text) {
-        const message = document.createElement("div");
-        message.className = "message mine";
-        message.append(document.createTextNode(text));
-        const time = document.createElement("span");
-        time.className = "message-time";
-        time.textContent = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date());
-        message.append(time);
-        elements.chatMessages.append(message);
-        elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
-        animateSignal(currentMe, demoPoints.friend);
-        showToast("Сигнал прошёл по линии · это локальная демо-анимация.");
+      async function sendMessage(text) {
+        if (!isPaired || !connectionId || !currentUser) {
+          showToast("Сначала создай приглашение и дождись подключения друга.");
+          return;
+        }
+        if (sendingMessage) return;
+        sendingMessage = true;
+        const sendButton = elements.chatForm.querySelector('button[type="submit"]');
+        sendButton.disabled = true;
+        try {
+          const { data, error } = await supabaseClient
+            .from("messages")
+            .insert({
+              connection_id: connectionId,
+              sender_id: currentUser.id,
+              body: text
+            })
+            .select("id, connection_id, sender_id, body, created_at")
+            .single();
+          if (error) throw error;
+          renderMessage(data);
+          if (currentMe && friendPoint) {
+            animateSignal(currentMe, friendPoint);
+            showToast("Сообщение отправлено. Сигнал уже в пути.");
+          }
+        } finally {
+          sendingMessage = false;
+          sendButton.disabled = false;
+        }
       }
 
       document.getElementById("inviteButton").addEventListener("click", showInviteInfo);
+      elements.createInviteButton.addEventListener("click", () => createInvite().catch(showBackendError));
+      elements.copyInviteButton.addEventListener("click", () => copyInvite().catch(showBackendError));
       document.getElementById("chatOpenButton").addEventListener("click", openChat);
       document.getElementById("chatButton").addEventListener("click", openChat);
       document.getElementById("chatCloseButton").addEventListener("click", closeChat);
@@ -955,15 +1362,19 @@
       elements.locationButton.addEventListener("click", requestLocation);
       elements.hideLocationButton.addEventListener("click", hideLocation);
       document.getElementById("retryMapButton").addEventListener("click", initializeMap);
-      elements.chatForm.addEventListener("submit", (event) => {
+      elements.chatForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const text = elements.messageInput.value.trim();
         if (!text) {
           elements.messageInput.focus();
           return;
         }
-        addMessage(text);
-        elements.messageInput.value = "";
+        try {
+          await sendMessage(text);
+          if (isPaired) elements.messageInput.value = "";
+        } catch (error) {
+          showBackendError(error);
+        }
       });
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
@@ -986,6 +1397,7 @@
           keyboard: false
         }).addTo(map);
       }
+      initializeBackend().catch(showBackendError);
     })();
   </script>
 </body>

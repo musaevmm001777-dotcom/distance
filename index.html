@@ -8,6 +8,7 @@
   <title>distance — между нами</title>
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://gibs.earthdata.nasa.gov">
+  <link rel="preconnect" href="https://basemaps.cartocdn.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -76,7 +77,11 @@
     }
 
     .leaflet-container { background: #0a0e17; font: inherit; }
-    .leaflet-tile { filter: brightness(1.08) saturate(1.12) contrast(1.04); }
+    .leaflet-base-pane .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.7) saturate(.48) contrast(1.08); }
+    .leaflet-night-pane { mix-blend-mode: screen; }
+    .leaflet-night-pane .leaflet-tile { filter: saturate(1.2) contrast(1.04); }
+    .leaflet-label-pane { pointer-events: none; }
+    .leaflet-label-pane .leaflet-tile { filter: brightness(1.1); }
     .leaflet-overlay-pane path.connection-glow { filter: drop-shadow(0 0 7px rgba(197, 165, 255, .95)); }
     .leaflet-control-attribution {
       margin: 0 12px 12px 0 !important;
@@ -89,7 +94,32 @@
       backdrop-filter: blur(12px);
     }
     .leaflet-control-attribution a { color: #bac3d1 !important; }
-    .leaflet-control-zoom { display: none; }
+    .leaflet-control-zoom {
+      margin: 76px 0 0 12px !important;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.13) !important;
+      border-radius: 12px !important;
+      box-shadow: 0 8px 26px rgba(0,0,0,.24) !important;
+      backdrop-filter: blur(14px);
+    }
+    .leaflet-control-zoom a,
+    .leaflet-control-zoom a:hover {
+      width: 34px !important;
+      height: 34px !important;
+      border: 0 !important;
+      background: rgba(12,16,26,.88) !important;
+      color: #eee9fb !important;
+      line-height: 34px !important;
+    }
+    .leaflet-control-zoom-in { border-bottom: 1px solid rgba(255,255,255,.1) !important; }
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(11,14,23,.94);
+      color: #f2effa;
+      box-shadow: 0 8px 25px rgba(0,0,0,.26);
+    }
+    .leaflet-popup-content { margin: 10px 13px; font-size: 11px; }
 
     .topbar {
       position: absolute;
@@ -287,7 +317,8 @@
     .avatar.friend { background: linear-gradient(145deg, #e1a8bc, #8d78ba); }
     .person-name { overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
     .person-place { margin-top: 4px; color: var(--muted); font-size: 10px; }
-    .distance { margin-left: auto; color: #e3d8ff; font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .distance { display: grid; justify-items: end; gap: 3px; margin-left: auto; color: #e3d8ff; font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .distance-caption { color: #939bad; font-size: 9px; font-weight: 450; letter-spacing: .02em; }
     .connection-caption { margin-top: 13px; color: #aab1bf; font-size: 11px; line-height: 1.5; }
 
     .action-stack { display: grid; min-width: 150px; gap: 8px; pointer-events: auto; }
@@ -504,7 +535,7 @@
                 <div class="person-place" id="placesText">Точка рядом с Москвой · пример у Берлина</div>
               </div>
             </div>
-            <div class="distance" id="distanceText">1 608 км</div>
+            <div class="distance"><span id="distanceText">1 608 км</span><span class="distance-caption">по прямой</span></div>
           </div>
           <div class="connection-caption">Отправь сообщение — и маленький световой сигнал пройдёт между точками.</div>
         </div>
@@ -584,6 +615,7 @@
       let friendMarker = null;
       let routeGlow = null;
       let routeLine = null;
+      let nightLightsLayer = null;
       let signalMarker = null;
       let currentMe = [...demoPoints.me];
       let toastTimer = 0;
@@ -616,11 +648,44 @@
         return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
       }
 
+      function greatCirclePath(from, to, segments = 96) {
+        const toVector = ([latitude, longitude]) => {
+          const lat = latitude * Math.PI / 180;
+          const lng = longitude * Math.PI / 180;
+          return [Math.cos(lat) * Math.cos(lng), Math.cos(lat) * Math.sin(lng), Math.sin(lat)];
+        };
+        const start = toVector(from);
+        const end = toVector(to);
+        const dot = Math.max(-1, Math.min(1, start[0] * end[0] + start[1] * end[1] + start[2] * end[2]));
+        const angle = Math.acos(dot);
+        if (angle < 1e-8) return [from, to];
+
+        const sinAngle = Math.sin(angle);
+        const points = [];
+        let previousLongitude = from[1];
+        for (let index = 0; index <= segments; index += 1) {
+          const fraction = index / segments;
+          const startWeight = Math.sin((1 - fraction) * angle) / sinAngle;
+          const endWeight = Math.sin(fraction * angle) / sinAngle;
+          const x = startWeight * start[0] + endWeight * end[0];
+          const y = startWeight * start[1] + endWeight * end[1];
+          const z = startWeight * start[2] + endWeight * end[2];
+          const latitude = Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI;
+          let longitude = Math.atan2(y, x) * 180 / Math.PI;
+          while (longitude - previousLongitude > 180) longitude -= 360;
+          while (longitude - previousLongitude < -180) longitude += 360;
+          points.push([latitude, longitude]);
+          previousLongitude = longitude;
+        }
+        return points;
+      }
+
       function updateConnection() {
         if (!map || !myMarker || !friendMarker || !routeGlow || !routeLine) return;
+        const path = greatCirclePath(currentMe, demoPoints.friend);
         myMarker.setLatLng(currentMe);
-        routeGlow.setLatLngs([currentMe, demoPoints.friend]);
-        routeLine.setLatLngs([currentMe, demoPoints.friend]);
+        routeGlow.setLatLngs(path);
+        routeLine.setLatLngs(path);
         elements.distanceText.textContent = `${Math.round(haversineKm(currentMe, demoPoints.friend)).toLocaleString("ru-RU")} км`;
         map.fitBounds(L.latLngBounds([currentMe, demoPoints.friend]), { padding: [90, 90], maxZoom: 5, animate: true });
       }
@@ -635,29 +700,57 @@
           map.remove();
           map = null;
         }
-        map = L.map("map", { zoomControl: false, scrollWheelZoom: false, worldCopyJump: true, attributionControl: true });
-        L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg", {
+        map = L.map("map", { zoomControl: false, scrollWheelZoom: true, worldCopyJump: true, attributionControl: true });
+        L.control.zoom({ position: "topleft" }).addTo(map);
+        const basePane = map.createPane("basePane");
+        basePane.classList.add("leaflet-base-pane");
+        basePane.style.zIndex = "200";
+        const nightPane = map.createPane("nightPane");
+        nightPane.classList.add("leaflet-night-pane");
+        nightPane.style.zIndex = "250";
+        const labelPane = map.createPane("labelPane");
+        labelPane.classList.add("leaflet-label-pane");
+        labelPane.style.zIndex = "350";
+
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 20,
+          pane: "basePane",
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+        nightLightsLayer = L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg", {
           minZoom: 0,
           maxZoom: 8,
           maxNativeZoom: 8,
+          opacity: .76,
+          pane: "nightPane",
           attribution: '&copy; <a href="https://earthdata.nasa.gov/">NASA Earth Observatory</a> · Earth at Night (2012)'
         }).addTo(map);
-        routeGlow = L.polyline([currentMe, demoPoints.friend], {
+        map.on("zoomend", () => {
+          if (!nightLightsLayer) return;
+          const zoom = map.getZoom();
+          nightLightsLayer.setOpacity(zoom <= 5 ? .76 : Math.max(0, .76 - (zoom - 5) * .19));
+        });
+
+        const path = greatCirclePath(currentMe, demoPoints.friend);
+        routeGlow = L.polyline(path, {
           className: "connection-glow",
           color: "#b592ff",
-          weight: 7,
-          opacity: .46,
+          weight: 8,
+          opacity: .52,
           lineCap: "round"
         }).addTo(map);
-        routeLine = L.polyline([currentMe, demoPoints.friend], {
+        routeLine = L.polyline(path, {
           color: "#c5a5ff",
-          weight: 1.4,
-          opacity: .68,
-          dashArray: "3 9",
+          weight: 1.5,
+          opacity: .92,
+          dashArray: "2 10",
           lineCap: "round"
         }).addTo(map);
         myMarker = L.marker(currentMe, { icon: customPin(false), keyboard: false }).addTo(map);
-        friendMarker = L.marker(demoPoints.friend, { icon: customPin(true), keyboard: false }).addTo(map);
+        friendMarker = L.marker(demoPoints.friend, { icon: customPin(true), keyboard: false })
+          .bindPopup("Берлин, Германия · демо-точка")
+          .addTo(map);
+        myMarker.bindPopup("Москва, Россия · демо-точка");
         map.fitBounds(L.latLngBounds([currentMe, demoPoints.friend]), { padding: [95, 95], maxZoom: 5 });
       }
 
@@ -722,6 +815,7 @@
         elements.locationState.textContent = "Браузер спросит разрешение. Координаты останутся только в этой вкладке.";
         navigator.geolocation.getCurrentPosition((position) => {
           currentMe = [position.coords.latitude, position.coords.longitude];
+          myMarker.setPopupContent("Твоя точка · точный адрес не отображается");
           elements.locationButton.hidden = true;
           elements.hideLocationButton.hidden = false;
           elements.locationState.textContent = "Точка показана только тебе. Она не сохраняется и не отправляется.";
@@ -746,6 +840,7 @@
 
       function hideLocation() {
         currentMe = [...demoPoints.me];
+        if (myMarker) myMarker.setPopupContent("Москва, Россия · демо-точка");
         elements.locationButton.hidden = false;
         elements.hideLocationButton.hidden = true;
         elements.locationState.textContent = "Твоя геопозиция скрыта и удалена из памяти страницы.";

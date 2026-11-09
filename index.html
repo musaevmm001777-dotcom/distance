@@ -997,6 +997,12 @@
         showToast(message.slice(0, 180));
       }
 
+      function clearInviteFromUrl() {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete("invite");
+        window.history.replaceState({}, "", cleanUrl);
+      }
+
       async function refreshConnection() {
         if (!currentUser) return;
         const { data, error } = await supabaseClient
@@ -1076,8 +1082,7 @@
         await Promise.all([loadConnectionLocations(), loadMessages()]);
         subscribeToConnection();
         if (activeInviteUrl) {
-          inviteUrl.searchParams.delete("invite");
-          window.history.replaceState({}, "", inviteUrl);
+          clearInviteFromUrl();
           activeInviteUrl = "";
         }
       }
@@ -1143,10 +1148,16 @@
             const { error: inviteError } = await supabaseClient.rpc("accept_invite", {
               invite_code_input: inviteCode
             });
-            if (inviteError) throw inviteError;
-            inviteUrl.searchParams.delete("invite");
-            window.history.replaceState({}, "", inviteUrl);
-            showToast("Приглашение принято. Теперь вы связаны.");
+            if (inviteError) {
+              if (!inviteError.message.includes("Invite not found or already used")) throw inviteError;
+              await refreshConnection();
+              if (!isPaired) throw inviteError;
+              clearInviteFromUrl();
+              showToast("Приглашение уже принято — вы подключены.");
+            } else {
+              clearInviteFromUrl();
+              showToast("Приглашение принято. Теперь вы связаны.");
+            }
           }
           await refreshConnection();
           if (!isPaired) {
